@@ -58,7 +58,7 @@ Se espera que las entregas incluyan una implementación funcional, correctamente
 
 ---
 
-## Contrato 2 – `ReportesView` (solo lectura)
+## [Contrato 2 – `ReportesView` (solo lectura)](https://github.com/simon1494/ReportView)
 
 ### Funcionalidades
 - Consultar top 5 vendedores con mejor reputación.
