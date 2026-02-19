@@ -11,9 +11,14 @@ mod contract {
         storage::{traits::StorageLayout, Mapping, StorageVec},
     };
     use scale_info::{prelude::format};
+
     pub const COMPRADOR: Rol = Rol::Comprador;
     pub const VENDEDOR: Rol = Rol::Vendedor;
 
+    /// Enumeración de todos los posibles errores que puede retornar el contrato.
+    /// 
+    /// Estos errores cubren validaciones de negocio, estados inconsistentes,
+    /// permisos insuficientes y operaciones inválidas en el sistema de marketplace.
     #[ink::scale_derive(Encode, Decode, TypeInfo)]
     #[derive(Debug, PartialEq)]
 
@@ -65,7 +70,222 @@ mod contract {
         NoTieneCalificaciones,
     }
 
+    /// Enumeración de posibles estados de una orden de compra.
+    /// 
+    /// Define el ciclo de vida de una orden desde su creación hasta
+    /// su finalización (recibida o cancelada).
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
+    #[ink::scale_derive(Encode, Decode, TypeInfo)]
+    pub enum EstadoOrden {
+        Pendiente,
+        Enviada,
+        Recibida,
+        PreCancelada,
+        Cancelada,
+    }
+
+
+    /// Enumeración de roles que puede tener un usuario en el marketplace.
+    /// 
+    /// Un usuario puede tener uno o más roles simultáneamente.
+    #[ink::scale_derive(Encode, Decode, TypeInfo)]
+    #[cfg_attr(feature = "std", derive(StorageLayout))]
+    #[derive(PartialEq, Clone)]
+    pub enum Rol {
+        Comprador,
+        Vendedor,
+        Ambos,
+    }
+
+    /// Estructura principal del contrato de marketplace.
+    /// 
+    /// Almacena toda la información del sistema incluyendo usuarios, productos,
+    /// publicaciones, órdenes y categorías. Utiliza estructuras de almacenamiento
+    /// optimizadas de ink! para manejar colecciones de datos en blockchain.
+    /// 
+    /// # Campos
+    /// 
+    /// * `m_usuarios` - Mapping de AccountId a Usuario para búsquedas rápidas
+    /// * `v_usuarios` - Vector de AccountIds para iteración de usuarios
+    /// * `productos` - Vector de todos los productos registrados
+    /// * `ordenes` - Vector de todas las órdenes de compra
+    /// * `publicaciones` - Vector de todas las publicaciones activas e inactivas
+    /// * `categorias` - Vector de categorías disponibles para clasificar productos
+    #[ink(storage)]
+    pub struct Sistema {
+        m_usuarios: Mapping<AccountId, Usuario>,
+        v_usuarios: StorageVec<AccountId>,
+        productos: StorageVec<Producto>,
+        ordenes: StorageVec<Orden>,
+        publicaciones: StorageVec<Publicacion>,
+        categorias: StorageVec<Categoria>,
+    }
+
+    /// Estructura que representa una orden de compra.
+    /// 
+    /// Registra una transacción entre comprador y vendedor, incluyendo
+    /// el producto, cantidad, precio total, estado y calificaciones mutuas.
+    /// 
+    /// # Campos
+    /// 
+    /// * `id` - Identificador único de la orden
+    /// * `id_publicacion` - ID de la publicación comprada
+    /// * `id_vendedor` - AccountId del vendedor
+    /// * `id_comprador` - AccountId del comprador
+    /// * `status` - Estado actual de la orden
+    /// * `cantidad` - Cantidad de unidades compradas
+    /// * `precio_total` - Precio total de la orden
+    /// * `cal_vendedor` - Calificación que recibió el vendedor (1-5 o None)
+    /// * `cal_comprador` - Calificación que recibió el comprador (1-5 o None)
+    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
+    #[ink::scale_derive(Encode, Decode, TypeInfo)]
+    #[derive(Clone)]
+    pub struct Orden {
+        id: u32,
+        id_publicacion: u32,
+        id_vendedor: AccountId,
+        id_comprador: AccountId,
+        status: EstadoOrden,
+        cantidad: u32,
+        precio_total: Balance,
+        cal_vendedor: Option<u8>,  //calificacion que recibe el vendedor
+        cal_comprador: Option<u8>, //calificacion que recibe el comprador
+    }
+
+    /// Estructura que representa una publicación de venta.
+    /// 
+    /// Una publicación vincula un producto con un precio y stock específicos
+    /// del vendedor. Puede estar activa o inactiva según disponibilidad.
+    /// 
+    /// # Campos
+    /// 
+    /// * `id` - Identificador único de la publicación
+    /// * `id_prod` - ID del producto publicado
+    /// * `id_user` - AccountId del vendedor
+    /// * `stock` - Cantidad disponible en esta publicación
+    /// * `precio_unitario` - Precio por unidad
+    /// * `activa` - Estado de la publicación (true = disponible)
+    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
+    #[ink::scale_derive(Encode, Decode, TypeInfo)]
+    #[derive(PartialEq, Debug, Clone)]
+    pub struct Publicacion {
+        id: u32,
+        id_prod: u32,      
+        id_user: AccountId,
+        stock: u32,
+        precio_unitario: Balance,
+        activa: bool,
+    }
+
+
+    /// Estructura que representa un producto del marketplace.
+    /// 
+    /// Los productos son creados por vendedores y pueden ser publicados
+    /// para su venta con precio y stock específicos.
+    /// 
+    /// # Campos
+    /// 
+    /// * `id` - Identificador único del producto
+    /// * `id_vendedor` - AccountId del vendedor que creó el producto
+    /// * `nombre` - Nombre del producto
+    /// * `descripcion` - Descripción detallada del producto
+    /// * `categoria` - ID de la categoría a la que pertenece
+    /// * `stock` - Cantidad total disponible del producto
+    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
+    #[ink::scale_derive(Encode, Decode, TypeInfo)]
+    #[derive(PartialEq, Debug)]
+    pub struct Producto {
+        id: u32,
+        id_vendedor: AccountId,
+        nombre: String,
+        descripcion: String,
+        categoria: u32,
+        stock: u32,
+    }
+
+
+    /// Estructura que representa una categoría de productos.
+    /// 
+    /// Las categorías permiten clasificar y organizar los productos
+    /// del marketplace para facilitar la búsqueda.
+    /// 
+    /// # Campos
+    /// 
+    /// * `id` - Identificador único de la categoría
+    /// * `nombre` - Nombre normalizado de la categoría (minúsculas, sin espacios extra)
+    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
+    #[ink::scale_derive(Encode, Decode, TypeInfo)]
+    pub struct Categoria {
+        id: u32,
+        nombre: String,
+    }
+
+
+    /// Estructura que representa un usuario del marketplace.
+    /// 
+    /// Contiene la información personal del usuario, sus roles,
+    /// y sus calificaciones acumuladas como comprador y vendedor.
+    /// 
+    /// # Campos
+    /// 
+    /// * `id` - AccountId único del usuario en la blockchain
+    /// * `nombre` - Nombre de usuario
+    /// * `mail` - Correo electrónico del usuario
+    /// * `rating` - Calificaciones como comprador y vendedor
+    /// * `roles` - Lista de roles asignados al usuario
+    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
+    #[ink::scale_derive(Encode, Decode, TypeInfo)]
+    #[derive(Clone)]
+    pub struct Usuario {
+        id: AccountId,
+        nombre: String,
+        mail: String,
+        rating: Rating,
+        roles: Vec<Rol>,
+    }
+
+    /// Estructura que almacena las calificaciones de un usuario.
+    /// 
+    /// Mantiene dos calificaciones separadas: como comprador y como vendedor.
+    /// Cada calificación se almacena como tupla (suma_total, cantidad) para
+    /// calcular promedios, y también se guarda el promedio en formato string.
+    /// 
+    /// # Campos
+    /// 
+    /// * `calificacion_comprador` - (suma de puntos, cantidad de calificaciones) como comprador
+    /// * `calificacion_vendedor` - (suma de puntos, cantidad de calificaciones) como vendedor
+    /// * `calificacion_comprador_str` - Promedio como comprador en formato "X.Y"
+    /// * `calificacion_vendedor_str` - Promedio como vendedor en formato "X.Y"
+    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
+    #[ink::scale_derive(Encode, Decode, TypeInfo)]
+    #[derive(Clone)]
+    pub struct Rating {
+        calificacion_comprador: (u32, u32),
+        calificacion_vendedor: (u32, u32),
+        calificacion_comprador_str: String,
+        calificacion_vendedor_str: String,
+    }
+
+    /// Trait que define las operaciones de gestión de productos.
+    /// 
+    /// Proporciona funcionalidad para crear, validar y listar productos
+    /// dentro del sistema de marketplace.
     pub trait GestionProducto {
+        /// Crea un nuevo producto en el sistema.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id_vendedor` - AccountId del vendedor que crea el producto
+        /// * `nombre` - Nombre del producto
+        /// * `descripcion` - Descripción detallada del producto
+        /// * `categoria` - Nombre de la categoría a la que pertenece
+        /// * `stock` - Cantidad inicial disponible
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(u32)` - ID del producto creado
+        /// * `Err(ErroresContrato)` - Error si la validación falla
         fn _crear_producto(
             &mut self,
             id_vendedor: AccountId,
@@ -75,12 +295,46 @@ mod contract {
             stock: u32,
         ) -> Result<u32, ErroresContrato>;
 
+        /// Verifica si un producto ya existe en el sistema.
+        /// 
+        /// Compara nombre y categoría para determinar duplicados.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `p` - Referencia al producto a verificar
+        /// 
+        /// # Retorno
+        /// 
+        /// * `true` si el producto existe
+        /// * `false` si no existe
         fn producto_existe(&self, p: &Producto) -> bool;
 
+        /// Retorna una lista de todos los productos registrados.
+        /// 
+        /// # Retorno
+        /// 
+        /// Vector con todos los productos del sistema
         fn _listar_productos(&self) -> Vec<Producto>;
     }
 
+    /// Trait que define las operaciones de gestión de usuarios.
+    /// 
+    /// Proporciona funcionalidad para registrar, buscar, listar usuarios
+    /// y administrar sus roles en el sistema.
     pub trait GestionUsuario {
+        /// Registra un nuevo usuario en el sistema.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id` - AccountId del usuario
+        /// * `nombre` - Nombre del usuario
+        /// * `mail` - Correo electrónico del usuario
+        /// * `rol` - Rol inicial (Comprador, Vendedor o Ambos)
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(String)` - Mensaje de confirmación
+        /// * `Err(ErroresContrato)` - Error si el usuario ya existe o los datos son inválidos
         fn _registrar_usuario(
             &mut self,
             id: AccountId,
@@ -89,18 +343,80 @@ mod contract {
             rol: Rol,
         ) -> Result<String, ErroresContrato>;
 
+        /// Obtiene los datos de un usuario por su AccountId.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id` - AccountId del usuario a buscar
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(Usuario)` - Datos del usuario
+        /// * `Err(ErroresContrato::UsuarioNoExiste)` - Si el usuario no está registrado
         fn get_user(&mut self, id: &AccountId) -> Result<Usuario, ErroresContrato>;
 
+        /// Retorna una lista de todos los usuarios registrados.
+        /// 
+        /// # Retorno
+        /// 
+        /// Vector con todos los usuarios del sistema
         fn _listar_usuarios(&self) -> Vec<Usuario>;
 
+        /// Busca un usuario por su correo electrónico.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `mail` - Correo electrónico a buscar
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(Usuario)` - Usuario encontrado
+        /// * `Err(ErroresContrato::MailInexistente)` - Si no existe usuario con ese email
         fn get_usuario_by_mail(&self, mail: &str) -> Result<Usuario, ErroresContrato>;
 
+        /// Busca un usuario por su nombre de usuario.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `name` - Nombre de usuario a buscar
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(Usuario)` - Usuario encontrado
+        /// * `Err(ErroresContrato::UsuarioYaExistente)` - Si existe un usuario con ese nombre
         fn get_usuario_by_username(&self, name: &str) -> Result<Usuario, ErroresContrato>;
 
+        /// Asigna un rol adicional a un usuario existente.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id` - AccountId del usuario
+        /// * `rol` - Rol a asignar (Comprador, Vendedor o Ambos)
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(String)` - Mensaje de confirmación
+        /// * `Err(ErroresContrato)` - Error si el usuario no existe o ya tiene el rol
         fn _asignar_rol(&mut self, id: AccountId, rol: Rol) -> Result<String, ErroresContrato>;
     }
 
+    /// Trait que define las operaciones de gestión de órdenes de compra.
+    /// 
+    /// Maneja el ciclo completo de vida de una orden: creación, envío,
+    /// recepción, cancelación y calificación entre comprador y vendedor.
     pub trait GestionOrden {
+        /// Crea una nueva orden de compra sobre una publicación.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id_pub` - ID de la publicación a comprar
+        /// * `id_comprador` - AccountId del comprador
+        /// * `cantidad` - Cantidad de unidades solicitadas
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(u32)` - ID de la orden creada
+        /// * `Err(ErroresContrato)` - Error si la validación falla o no hay stock
         fn _crear_orden(
             &mut self,
             id_pub: u32,
@@ -108,22 +424,76 @@ mod contract {
             cantidad: u32,
         ) -> Result<u32, ErroresContrato>;
 
+        /// Retorna una lista de todas las órdenes del sistema.
+        /// 
+        /// # Retorno
+        /// 
+        /// Vector con todas las órdenes registradas
         fn _listar_ordenes(&self) -> Vec<Orden>;
 
+        /// Marca una orden como enviada por el vendedor.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id_orden` - ID de la orden a enviar
+        /// * `id_vendedor` - AccountId del vendedor que envía
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(())` - Si el envío fue registrado exitosamente
+        /// * `Err(ErroresContrato)` - Error si la orden no existe, no está pendiente o el vendedor no coincide
         fn _enviar_orden(
             &mut self,
             id_orden: u32,
             id_vendedor: AccountId,
         ) -> Result<(), ErroresContrato>;
 
+        /// Marca una orden como recibida por el comprador.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id_orden` - ID de la orden a recibir
+        /// * `id_comprador` - AccountId del comprador que recibe
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(())` - Si la recepción fue registrada exitosamente
+        /// * `Err(ErroresContrato)` - Error si la orden no existe, no está enviada o el comprador no coincide
         fn _recibir_orden(
             &mut self,
             id_orden: u32,
             id_comprador: AccountId,
         ) -> Result<(), ErroresContrato>;
 
+        /// Cancela una orden mediante consenso entre comprador y vendedor.
+        /// 
+        /// El comprador inicia la cancelación (PreCancelada) y el vendedor la confirma.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id_orden` - ID de la orden a cancelar
+        /// * `id_usuario` - AccountId del usuario que solicita cancelación
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(String)` - Mensaje indicando el estado de la cancelación
+        /// * `Err(ErroresContrato)` - Error si la orden no puede ser cancelada o el usuario no pertenece a la orden
         fn _cancelar_orden(&mut self, id_orden: u32, id_usuario: AccountId) -> Result<String, ErroresContrato>;
 
+        /// Registra una calificación para una orden completada.
+        /// 
+        /// El comprador califica al vendedor y viceversa.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id_orden` - ID de la orden a calificar
+        /// * `id` - AccountId del usuario que califica
+        /// * `puntaje` - Calificación de 1 a 5 estrellas
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(())` - Si la calificación fue registrada exitosamente
+        /// * `Err(ErroresContrato)` - Error si la orden no está recibida, el puntaje es inválido o ya fue calificada
         fn _calificar_orden(
             &mut self,
             id_orden: u32,
@@ -132,7 +502,24 @@ mod contract {
         ) -> Result<(), ErroresContrato>;
     }
 
+    /// Trait que define las operaciones de gestión de publicaciones.
+    /// 
+    /// Una publicación representa un producto disponible para la venta
+    /// con precio y stock específicos del vendedor.
     pub trait GestionPublicacion {
+        /// Crea una nueva publicación de un producto para la venta.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id_producto` - ID del producto a publicar
+        /// * `id_usuario` - AccountId del vendedor
+        /// * `stock` - Cantidad disponible para esta publicación
+        /// * `precio` - Precio unitario en Balance
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(u32)` - ID de la publicación creada
+        /// * `Err(ErroresContrato)` - Error si el stock o precio son inválidos
         fn _crear_publicacion(
             &mut self,
             id_producto: u32,
@@ -141,30 +528,129 @@ mod contract {
             precio: Balance,
         ) -> Result<u32, ErroresContrato>;
 
+        /// Obtiene el precio unitario de una publicación.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id_pub` - ID de la publicación
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(Balance)` - Precio unitario de la publicación
+        /// * `Err(ErroresContrato::PublicacionNoExiste)` - Si la publicación no existe
         fn get_precio_unitario(&self, id_pub: u32) -> Result<Balance, ErroresContrato>;
 
+        /// Obtiene el AccountId del vendedor de una publicación.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id_pub` - ID de la publicación
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(AccountId)` - AccountId del vendedor
+        /// * `Err(ErroresContrato::PublicacionNoExiste)` - Si la publicación no existe
         fn get_id_vendedor(&self, id_pub: u32) -> Result<AccountId, ErroresContrato>; // HAY QUE VOLARLO A LA MIERDA EN LA 2DA ENTREGA
 
+        /// Retorna una lista de todas las publicaciones del sistema.
+        /// 
+        /// # Retorno
+        /// 
+        /// Vector con todas las publicaciones (activas e inactivas)
         fn _listar_publicaciones(&self) -> Vec<Publicacion>;
 
+        /// Retorna las publicaciones de un vendedor específico.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id_usuario` - AccountId del vendedor
+        /// 
+        /// # Retorno
+        /// 
+        /// Vector con todas las publicaciones del vendedor
         fn _listar_publicaciones_propias(&self, id_usuario: AccountId) -> Vec<Publicacion>;
     }
 
+    /// Trait que define las operaciones de gestión de categorías.
+    /// 
+    /// Proporciona funcionalidad para crear, listar y buscar categorías
+    /// que clasifican los productos en el marketplace.
     pub trait GestionCategoria {
+        /// Registra una nueva categoría en el sistema.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `nombre` - Nombre de la categoría (se normaliza automáticamente)
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(String)` - Mensaje de confirmación
+        /// * `Err(ErroresContrato)` - Error si la categoría ya existe o el nombre es inválido
         fn _registrar_categoria(&mut self, nombre: String) -> Result<String, ErroresContrato>;
 
+        /// Retorna una lista de todas las categorías registradas.
+        /// 
+        /// # Retorno
+        /// 
+        /// Vector con todas las categorías del sistema
         fn _listar_categorias(&self) -> Vec<Categoria>;
 
+        /// Busca una categoría por su nombre.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `nombre` - Nombre de la categoría a buscar
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(u32)` - ID de la categoría encontrada
+        /// * `Err(ErroresContrato::CategoriaInexistente)` - Si la categoría no existe
         fn get_categoria_by_name(&self, nombre: &String) -> Result<u32, ErroresContrato>;
 
+        /// Normaliza el nombre de una categoría (minúsculas, sin espacios extra).
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `nombre` - Nombre original de la categoría
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(String)` - Nombre normalizado
+        /// * `Err(ErroresContrato::NombreCategoriaVacio)` - Si el nombre queda vacío después de normalizar
         fn clean_cat_name(&self, nombre: &String) -> Result<String, ErroresContrato>;
     }
 
+    /// Trait que define operaciones de control de inventario.
+    /// 
+    /// Proporciona métodos para gestionar cantidades de stock,
+    /// validar disponibilidad y descontar unidades.
     pub trait ControlStock {
+        /// Obtiene la cantidad actual en stock.
+        /// 
+        /// # Retorno
+        /// 
+        /// Retorna la cantidad disponible como `u32`.
         fn get_cantidad(&self) -> u32;
 
+        /// Establece una nueva cantidad de stock.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `nueva` - Nueva cantidad a establecer
         fn set_cantidad(&mut self, nueva: u32);
 
+        /// Descuenta una cantidad específica del stock disponible.
+        /// 
+        /// Verifica que haya stock suficiente antes de descontar.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `cantidad_a_descontar` - Cantidad a restar del stock actual
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(())` si el descuento fue exitoso
+        /// * `Err(ErroresContrato::StockInsuficiente)` si no hay suficiente stock
         fn descontar_stock(&mut self, cantidad_a_descontar: u32) -> Result<(), ErroresContrato> {
             self.chequear_stock_disponible(cantidad_a_descontar)?;
             let nueva_cantidad = self
@@ -175,6 +661,16 @@ mod contract {
             Ok(())
         }
 
+        /// Verifica si hay suficiente stock disponible para una cantidad solicitada.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `cantidad_a_descontar` - Cantidad a verificar
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(())` si hay stock suficiente
+        /// * `Err(ErroresContrato::StockInsuficiente)` si no hay suficiente stock
         fn chequear_stock_disponible(
             &self,
             cantidad_a_descontar: u32,
@@ -186,17 +682,677 @@ mod contract {
         }
     }
 
-    ///Estructura principal del contrato
-    #[ink(storage)]
-    pub struct Sistema {
-        m_usuarios: Mapping<AccountId, Usuario>,
-        v_usuarios: StorageVec<AccountId>,
-        productos: StorageVec<Producto>,
-        ordenes: StorageVec<Orden>,
-        publicaciones: StorageVec<Publicacion>,
-        categorias: StorageVec<Categoria>,
+
+    impl Usuario {
+        /// Crea un nuevo usuario con datos iniciales.
+        /// 
+        /// El usuario se crea sin roles y con rating en cero.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id` - AccountId del usuario
+        /// * `nombre` - Nombre del usuario
+        /// * `mail` - Correo electrónico
+        /// 
+        /// # Retorno
+        /// 
+        /// Nueva instancia de Usuario
+        pub fn new(id: AccountId, nombre: String, mail: String) -> Usuario {
+            Usuario {
+                id,
+                nombre,
+                mail,
+                rating: Rating::new(),
+                roles: Vec::new(),
+            }
+        }
+
+        /// Verifica si el usuario tiene un rol específico.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `rol` - Rol a verificar
+        /// 
+        /// # Retorno
+        /// 
+        /// * `true` si el usuario tiene el rol
+        /// * `false` si no lo tiene
+        pub fn has_role(&self, rol: Rol) -> bool {
+            self.roles.contains(&rol)
+        }
+
+        /// Obtiene el nombre del usuario.
+        /// 
+        /// # Retorno
+        /// 
+        /// Nombre del usuario como String
+        pub fn get_name(&self) -> String {
+            self.nombre.clone()
+        }
+
+        /// Obtiene el correo electrónico del usuario.
+        /// 
+        /// # Retorno
+        /// 
+        /// Email del usuario como String
+        pub fn get_mail(&self) -> String {
+            self.mail.clone()
+        }
+
+        /// Obtiene el AccountId del usuario.
+        /// 
+        /// # Retorno
+        /// 
+        /// AccountId del usuario
+        pub fn get_id(&self) -> AccountId {
+            self.id.clone()
+        }
+
+        /// Obtiene la calificación promedio del usuario como comprador.
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(String)` - Calificación en formato "X.Y"
+        /// * `Err(ErroresContrato)` - Si hay error al calcular
+        pub fn get_calificacion_comprador(&self)  -> Result<String, ErroresContrato> {
+            self.rating.get_rating_as_str(&Rol::Comprador)
+        }
+
+        /// Obtiene la calificación promedio del usuario como vendedor.
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(String)` - Calificación en formato "X.Y"
+        /// * `Err(ErroresContrato)` - Si hay error al calcular
+        pub fn get_calificacion_vendedor(&self) -> Result<String, ErroresContrato> {
+            self.rating.get_rating_as_str(&Rol::Vendedor)
+        }
+
+        /// Establece un nuevo correo electrónico para el usuario.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `nuevo_mail` - Nuevo correo electrónico
+        pub fn set_mail(&mut self, nuevo_mail: String) {
+            self.mail = nuevo_mail;
+        }
+
+        /// Establece un nuevo rating completo para el usuario.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `nuevo_rating` - Nueva estructura Rating con las calificaciones
+        pub fn set_rating(&mut self, nuevo_rating: Rating) {
+            self.rating = nuevo_rating;
+        }
+
+        /// Reemplaza todos los roles del usuario con una nueva lista.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `nuevos_roles` - Vector con los nuevos roles
+        pub fn set_roles(&mut self, nuevos_roles: Vec<Rol>) {
+            self.roles = nuevos_roles;
+        }
+
+        /// Agrega un rol al usuario si no lo tiene ya.
+        /// 
+        /// Previene duplicación de roles.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `rol` - Rol a agregar
+        pub fn add_rol(&mut self, rol: Rol) {
+            if !self.has_role(rol.clone()) {
+                self.roles.push(rol);
+            }
+        }
+
+        /// Remueve un rol específico del usuario.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `rol` - Rol a remover
+        pub fn remove_rol(&mut self, rol: &Rol) {
+            self.roles.retain(|r| r != rol);
+        }
+
+        /// Obtiene una referencia al rating del usuario.
+        /// 
+        /// # Retorno
+        /// 
+        /// Referencia al Rating del usuario
+        pub fn get_rating(&self) -> &Rating {
+            &self.rating
+        }
+
+        /// Obtiene una referencia a los roles del usuario.
+        /// 
+        /// # Retorno
+        /// 
+        /// Referencia al vector de roles
+        pub fn get_roles(&self) -> &Vec<Rol> {
+            &self.roles
+        }
+
+        
     }
 
+    impl core::fmt::Display for Usuario {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            let cal_comprador = self.get_calificacion_comprador()
+                .unwrap_or_else(|_| "N/A".to_string());
+            let cal_vendedor = self.get_calificacion_vendedor()
+                .unwrap_or_else(|_| "N/A".to_string());
+            
+            write!(f, "Usuario: {} | Email: {} | Calificación Comprador: {} | Calificación Vendedor: {}", 
+                   self.nombre, self.mail, cal_comprador, cal_vendedor)
+        }
+    }
+
+    impl Rating {
+        /// Crea una nueva estructura Rating con valores iniciales en cero.
+        /// 
+        /// # Retorno
+        /// 
+        /// Nueva instancia de Rating sin calificaciones
+        pub fn new() -> Rating {
+            Rating {
+                calificacion_comprador: (0, 0),
+                calificacion_vendedor: (0, 0),
+                calificacion_comprador_str: "0".to_string(),
+                calificacion_vendedor_str: "0".to_string(),
+            }
+        }
+
+        /// Agrega una calificación al usuario en su rol de comprador.
+        /// 
+        /// Actualiza automáticamente el promedio en formato string.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `puntaje` - Calificación de 1 a 5 estrellas
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(())` - Si la calificación fue agregada exitosamente
+        /// * `Err(ErroresContrato)` - Si hay error al calcular el promedio
+        fn agregar_calificacion_comprador(&mut self, puntaje: u8) -> Result<(), ErroresContrato> {
+            self.calificacion_comprador.0 =
+                self.calificacion_comprador.0.saturating_add(puntaje as u32); 
+            self.calificacion_comprador.1 = self.calificacion_comprador.1.saturating_add(1);
+            self.calificacion_comprador_str = self.get_rating_as_str(&Rol::Comprador)?;
+            Ok(())
+        }
+
+        /// Agrega una calificación al usuario en su rol de vendedor.
+        /// 
+        /// Actualiza automáticamente el promedio en formato string.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `puntaje` - Calificación de 1 a 5 estrellas
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(())` - Si la calificación fue agregada exitosamente
+        /// * `Err(ErroresContrato)` - Si hay error al calcular el promedio
+        fn agregar_calificacion_vendedor(&mut self, puntaje: u8) -> Result<(), ErroresContrato> {
+            self.calificacion_vendedor.0 =
+                self.calificacion_vendedor.0.saturating_add(puntaje as u32);
+            self.calificacion_vendedor.1 = self.calificacion_vendedor.1.saturating_add(1);
+            self.calificacion_vendedor_str = self.get_rating_as_str(&Rol::Vendedor)?;
+            Ok(())
+        }
+
+        /// Calcula y retorna el promedio de calificaciones en formato string.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `target_rol` - Rol para el cual calcular el promedio (Comprador o Vendedor)
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Ok(String)` - Promedio en formato "X.Y" (ej: "4.5")
+        /// * `Err(ErroresContrato::RolNoApropiado)` - Si se pasa el rol Ambos
+        /// * `Err(ErroresContrato::ErrorMultiplicacion)` - Si hay error en cálculos
+        fn get_rating_as_str(&self, target_rol: &Rol) -> Result<String, ErroresContrato> {
+            let (suma, cantidad) = match target_rol {
+                Rol::Comprador => self.calificacion_comprador,
+                Rol::Vendedor => self.calificacion_vendedor,
+                Rol::Ambos => return Err(ErroresContrato::RolNoApropiado),
+            };
+
+            if cantidad == 0 {
+                return Ok("0.0".to_string())
+            }
+
+            // Calculamos el promedio multiplicando por 10 para obtener un decimal
+            let promedio_x10: u32 = (suma
+                .checked_mul(10)
+                .ok_or(ErroresContrato::ErrorMultiplicacion)?)
+            .checked_div(cantidad)
+            .ok_or(ErroresContrato::ErrorMultiplicacion)?;
+
+            Ok(format!(
+                "{}.{}",
+                promedio_x10.div(10),
+                promedio_x10.rem(10)
+            ))
+        }
+
+        /// Obtiene la tupla de calificación del comprador (suma, cantidad).
+        /// 
+        /// # Retorno
+        /// 
+        /// Tupla (suma_total, cantidad_calificaciones)
+        pub fn get_calificacion_comprador(&self) -> (u32, u32) {
+            self.calificacion_comprador
+        }
+
+        /// Obtiene la tupla de calificación del vendedor (suma, cantidad).
+        /// 
+        /// # Retorno
+        /// 
+        /// Tupla (suma_total, cantidad_calificaciones)
+        pub fn get_calificacion_vendedor(&self) -> (u32, u32) {
+            self.calificacion_vendedor
+        }
+
+        /// Obtiene el string de calificación del comprador.
+        /// 
+        /// # Retorno
+        /// 
+        /// Promedio como comprador en formato "X.Y"
+        pub fn get_calificacion_comprador_str(&self) -> &String {
+            &self.calificacion_comprador_str
+        }
+
+        /// Obtiene el string de calificación del vendedor.
+        /// 
+        /// # Retorno
+        /// 
+        /// Promedio como vendedor en formato "X.Y"
+        pub fn get_calificacion_vendedor_str(&self) -> &String {
+            &self.calificacion_vendedor_str
+        }
+
+        /// Establece la tupla de calificación del comprador.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `calificacion` - Tupla (suma_total, cantidad_calificaciones)
+        pub fn set_calificacion_comprador(&mut self, calificacion: (u32, u32)) {
+            self.calificacion_comprador = calificacion;
+        }
+
+        /// Establece la tupla de calificación del vendedor.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `calificacion` - Tupla (suma_total, cantidad_calificaciones)
+        pub fn set_calificacion_vendedor(&mut self, calificacion: (u32, u32)) {
+            self.calificacion_vendedor = calificacion;
+        }
+
+        /// Establece el string de calificación del comprador.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `calificacion_str` - Calificación en formato "X.Y"
+        pub fn set_calificacion_comprador_str(&mut self, calificacion_str: String) {
+            self.calificacion_comprador_str = calificacion_str;
+        }
+
+        /// Establece el string de calificación del vendedor.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `calificacion_str` - Calificación en formato "X.Y"
+        pub fn set_calificacion_vendedor_str(&mut self, calificacion_str: String) {
+            self.calificacion_vendedor_str = calificacion_str;
+        }
+    }
+
+    impl Categoria {
+        /// Crea una nueva categoría.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id` - Identificador único
+        /// * `nombre` - Nombre normalizado de la categoría
+        /// 
+        /// # Retorno
+        /// 
+        /// Nueva instancia de Categoria
+        pub fn new(id: u32, nombre: String) -> Self {
+            Self { id, nombre }
+        }
+
+        /// Obtiene el ID de la categoría.
+        /// 
+        /// # Retorno
+        /// 
+        /// ID de la categoría
+        pub fn get_id(&self) -> u32 {
+            self.id
+        }
+
+        /// Obtiene el nombre de la categoría.
+        /// 
+        /// # Retorno
+        /// 
+        /// Nombre de la categoría
+        pub fn get_nombre(&self) -> String {
+            self.nombre.clone()
+        }
+    }
+
+    impl Producto {
+        /// Crea un nuevo producto con los datos proporcionados.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id` - Identificador único del producto
+        /// * `id_vendedor` - AccountId del vendedor creador
+        /// * `nombre` - Nombre del producto
+        /// * `descripcion` - Descripción del producto
+        /// * `categoria` - ID de la categoría
+        /// * `stock` - Cantidad inicial disponible
+        /// 
+        /// # Retorno
+        /// 
+        /// Nueva instancia de Producto
+        pub fn new(
+            id: u32,
+            id_vendedor: AccountId,
+            nombre: String,
+            descripcion: String,
+            categoria: u32,
+            stock: u32,
+        ) -> Producto {
+            Producto {
+                id,
+                id_vendedor,
+                nombre,
+                descripcion,
+                categoria,
+                stock,
+            }
+        }
+
+        /// Compara si dos productos son iguales por nombre y categoría.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `p` - Producto a comparar
+        /// 
+        /// # Retorno
+        /// 
+        /// * `true` si nombre y categoría coinciden
+        /// * `false` si son diferentes
+        pub fn eq(&self, p: &Producto) -> bool {
+            if self.nombre == p.nombre && self.categoria == p.categoria {
+                return true;
+            }
+            false
+        }
+
+        /// Obtiene el ID del producto.
+        /// 
+        /// # Retorno
+        /// 
+        /// ID del producto
+        pub fn get_id(&self) -> u32 {
+            self.id
+        }
+
+        /// Obtiene el nombre del producto.
+        /// 
+        /// # Retorno
+        /// 
+        /// Nombre del producto
+        pub fn get_nombre(&self) -> String {
+            self.nombre.clone()
+        }
+
+        /// Obtiene el ID de la categoría del producto.
+        /// 
+        /// # Retorno
+        /// 
+        /// ID de la categoría
+        pub fn get_id_categoria(&self) -> u32 {
+            self.categoria
+        }
+    }
+
+    impl ControlStock for Producto {
+        fn get_cantidad(&self) -> u32 {
+            self.stock
+        }
+
+        fn set_cantidad(&mut self, nueva: u32) {
+            self.stock = nueva;
+        }
+    }
+
+    impl Publicacion {
+        /// Crea una nueva publicación activa.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id` - Identificador único de la publicación
+        /// * `id_producto` - ID del producto a publicar
+        /// * `id_user` - AccountId del vendedor
+        /// * `stock` - Cantidad disponible
+        /// * `precio_unitario` - Precio por unidad
+        /// 
+        /// # Retorno
+        /// 
+        /// Nueva instancia de Publicacion (activa por defecto)
+        pub fn new(
+            id: u32,
+            id_producto: u32,
+            id_user: AccountId,
+            stock: u32,
+            precio_unitario: Balance,
+        ) -> Publicacion {
+            Publicacion {
+                id,
+                id_prod: id_producto,
+                id_user,
+                stock,
+                precio_unitario,
+                activa: true,
+            }
+        }
+
+        /// Obtiene el ID de la publicación.
+        /// 
+        /// # Retorno
+        /// 
+        /// ID de la publicación
+        pub fn get_id(&self) -> u32 {
+            self.id
+        }
+
+        /// Obtiene el ID del producto asociado a esta publicación.
+        /// 
+        /// # Retorno
+        /// 
+        /// ID del producto
+        pub fn get_id_producto(&self) -> u32 {
+            self.id_prod
+        }
+
+        /// Obtiene la cantidad disponible en stock de la publicación.
+        /// 
+        /// # Retorno
+        /// 
+        /// Stock disponible
+        pub fn stock(&self) -> u32 {
+            self.stock
+        }
+
+        /// Obtiene el estado activo/inactivo de la publicación.
+        /// 
+        /// # Retorno
+        /// 
+        /// `true` si la publicación está activa, `false` si está inactiva
+        pub fn get_activa(&self) -> bool {
+            self.activa
+        }
+
+        /// Establece el estado activo/inactivo de la publicación.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `activa` - Nuevo estado de la publicación
+        pub fn set_activa(&mut self, activa: bool) {
+            self.activa = activa;
+        }
+    }
+
+    impl ControlStock for Publicacion {
+        fn get_cantidad(&self) -> u32 {
+            self.stock
+        }
+
+        fn set_cantidad(&mut self, nueva: u32) {
+            self.stock = nueva;
+        }
+    }
+
+    impl Orden {
+        /// Crea una nueva orden de compra en estado Pendiente.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `id` - Identificador único de la orden
+        /// * `id_publicacion` - ID de la publicación comprada
+        /// * `id_vendedor` - AccountId del vendedor
+        /// * `id_comprador` - AccountId del comprador
+        /// * `cantidad` - Cantidad de unidades
+        /// * `precio_total` - Precio total de la compra
+        /// 
+        /// # Retorno
+        /// 
+        /// Nueva instancia de Orden sin calificaciones
+        pub fn new(
+            id: u32,
+            id_publicacion: u32,
+            id_vendedor: AccountId,
+            id_comprador: AccountId,
+            cantidad: u32,
+            precio_total: Balance,
+        ) -> Orden {
+            Orden {
+                id,
+                id_publicacion,
+                id_vendedor,
+                id_comprador,
+                status: EstadoOrden::Pendiente,
+                cantidad,
+                precio_total,
+                cal_vendedor: None,
+                cal_comprador: None,
+            }
+        }
+        /// Obtiene la cantidad de unidades de la orden.
+        /// 
+        /// # Retorno
+        /// 
+        /// Cantidad comprada
+        pub fn get_cantidad(&self) -> u32 {
+            self.cantidad
+        }
+
+        /// Obtiene el estado actual de la orden.
+        /// 
+        /// # Retorno
+        /// 
+        /// Estado de la orden (Pendiente, Enviada, Recibida, PreCancelada o Cancelada)
+        pub fn get_status(&self) -> EstadoOrden {
+            self.status
+        }
+
+        /// Obtiene el ID de la publicación asociada a la orden.
+        /// 
+        /// # Retorno
+        /// 
+        /// ID de la publicación
+        pub fn get_id_pub(&self) -> u32 {
+            self.id_publicacion
+        }
+
+        /// Obtiene el AccountId del comprador de la orden.
+        /// 
+        /// # Retorno
+        /// 
+        /// AccountId del comprador
+        pub fn get_id_comprador(&self) -> AccountId {
+            self.id_comprador.clone()
+        }
+
+        /// Obtiene el AccountId del vendedor de la orden.
+        /// 
+        /// # Retorno
+        /// 
+        /// AccountId del vendedor
+        pub fn get_id_vendedor(&self) -> AccountId {
+            self.id_vendedor.clone()
+        }
+
+        /// Obtiene la calificación que recibió el vendedor.
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Some(u8)` - Calificación de 1 a 5 si fue calificado
+        /// * `None` - Si aún no fue calificado
+        pub fn get_calificacion_vendedor(&self) -> Option<u8> {
+            self.cal_vendedor
+        }
+
+        /// Obtiene la calificación que recibió el comprador.
+        /// 
+        /// # Retorno
+        /// 
+        /// * `Some(u8)` - Calificación de 1 a 5 si fue calificado
+        /// * `None` - Si aún no fue calificado
+        pub fn get_calificacion_comprador(&self) -> Option<u8> {
+            self.cal_comprador
+        }
+
+        /// Establece el estado de la orden.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `nuevo_estado` - Nuevo estado para la orden
+        pub fn set_status(&mut self, nuevo_estado: EstadoOrden) {
+            self.status = nuevo_estado;
+        }
+
+        /// Establece la calificación del vendedor.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `calificacion` - Calificación a asignar (Some(1-5) o None)
+        pub fn set_calificacion_vendedor(&mut self, calificacion: Option<u8>) {
+            self.cal_vendedor = calificacion;
+        }
+
+        /// Establece la calificación del comprador.
+        /// 
+        /// # Parámetros
+        /// 
+        /// * `calificacion` - Calificación a asignar (Some(1-5) o None)
+        pub fn set_calificacion_comprador(&mut self, calificacion: Option<u8>) {
+            self.cal_comprador = calificacion;
+        }
+
+
+    }
+ 
     impl Sistema {
         /// #Constructor del contrato.
         ///
@@ -679,7 +1835,7 @@ mod contract {
             } else if usuario.has_role(rol.clone()) {
                 return Err(ErroresContrato::AlreadyHasRol);
             }
-            usuario.roles.push(rol);
+            usuario.add_rol(rol);
             self.m_usuarios.insert(id, &usuario);
             Ok(String::from("rol agregado correctamente"))
         }
@@ -710,7 +1866,7 @@ mod contract {
                     publicacion.descontar_stock(cantidad)?;
                     
                     if publicacion.stock == 0 {
-                        publicacion.activa = false;
+                        publicacion.set_activa(false);
                     }
 
                     self.publicaciones.set(id_pub, &publicacion);
@@ -826,7 +1982,7 @@ mod contract {
                             .get(orden.id_publicacion)
                             .ok_or(ErroresContrato::PublicacionNoExiste)?;
                         publicacion.stock = publicacion.stock.saturating_add(orden.cantidad);
-                        publicacion.activa = true; // Reactivar si estaba desactivada
+                        publicacion.set_activa(true); // Reactivar si estaba desactivada
                         self.publicaciones.set(orden.id_publicacion, &publicacion);
                         
                         Ok(String::from("La cancelación de la orden fue confirmada y el stock fue devuelto"))
@@ -967,6 +2123,7 @@ mod contract {
             }
         }
     }
+    
     impl GestionCategoria for Sistema {
         fn _registrar_categoria(&mut self, nombre: String) -> Result<String, ErroresContrato> {
             if self.get_categoria_by_name(&nombre).is_ok() {
@@ -1016,379 +2173,7 @@ mod contract {
             }
         }
     }
-
-    /// Estructuras relacionadas a Usuario
-
-    /// Roles existentes
-    #[ink::scale_derive(Encode, Decode, TypeInfo)]
-    #[cfg_attr(feature = "std", derive(StorageLayout))]
-    #[derive(PartialEq, Clone)]
-    pub enum Rol {
-        Comprador,
-        Vendedor,
-        Ambos,
-    }
-
-    /// Estructura que define al Usuario
-    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
-    #[ink::scale_derive(Encode, Decode, TypeInfo)]
-    #[derive(Clone)]
-    pub struct Usuario {
-        id: AccountId,
-        nombre: String,
-        mail: String,
-        pub rating: Rating,
-        roles: Vec<Rol>,
-    }
-
-    impl Usuario {
-        ///Crea un nuevo Usuario
-        pub fn new(id: AccountId, nombre: String, mail: String) -> Usuario {
-            Usuario {
-                id,
-                nombre,
-                mail,
-                rating: Rating::new(),
-                roles: Vec::new(),
-            }
-        }
-
-        /// Devuelve true si el usuario contiene el rol pasado por parametro
-        pub fn has_role(&self, rol: Rol) -> bool {
-            self.roles.contains(&rol)
-        }
-
-        /// Devuelve el nombre del usuario
-        pub fn get_name(&self) -> String {
-            self.nombre.clone()
-        }
-
-        /// Devuelve el email del usuario
-        pub fn get_mail(&self) -> String {
-            self.mail.clone()
-        }
-
-        /// Devuelve el AccountId del usuario
-        pub fn get_id(&self) -> AccountId {
-            self.id.clone()
-        }
-
-        /// Devuelve la calificacion del usuario como comprador en formato string
-        pub fn get_calificacion_comprador(&self)  -> Result<String, ErroresContrato> {
-            self.rating.get_rating_as_str(&Rol::Comprador)
-        }
-
-        /// Devuelve la calificacion del usuario como vendedor en formato string
-        pub fn get_calificacion_vendedor(&self) -> Result<String, ErroresContrato> {
-            self.rating.get_rating_as_str(&Rol::Vendedor)
-        }
-    }
-
-    impl core::fmt::Display for Usuario {
-        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-            let cal_comprador = self.get_calificacion_comprador()
-                .unwrap_or_else(|_| "N/A".to_string());
-            let cal_vendedor = self.get_calificacion_vendedor()
-                .unwrap_or_else(|_| "N/A".to_string());
-            
-            write!(f, "Usuario: {} | Email: {} | Calificación Comprador: {} | Calificación Vendedor: {}", 
-                   self.nombre, self.mail, cal_comprador, cal_vendedor)
-        }
-    }
-
-    /// Estructura correspondiente al rating de un usuario
-    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
-    #[ink::scale_derive(Encode, Decode, TypeInfo)]
-    #[derive(Clone)]
-    pub struct Rating {
-        pub calificacion_comprador: (u32, u32),
-        pub calificacion_vendedor: (u32, u32),
-        pub calificacion_comprador_str: String,
-        pub calificacion_vendedor_str: String,
-    }
-
-    impl Rating {
-        fn new() -> Rating {
-            Rating {
-                calificacion_comprador: (0, 0),
-                calificacion_vendedor: (0, 0),
-                calificacion_comprador_str: "0".to_string(),
-                calificacion_vendedor_str: "0".to_string(),
-            }
-        }
-
-        fn agregar_calificacion_comprador(&mut self, puntaje: u8) -> Result<(), ErroresContrato> {
-            self.calificacion_comprador.0 =
-                self.calificacion_comprador.0.saturating_add(puntaje as u32); 
-            self.calificacion_comprador.1 = self.calificacion_comprador.1.saturating_add(1);
-            self.calificacion_comprador_str = self.get_rating_as_str(&Rol::Comprador)?;
-            Ok(())
-        }
-
-        fn agregar_calificacion_vendedor(&mut self, puntaje: u8) -> Result<(), ErroresContrato> {
-            self.calificacion_vendedor.0 =
-                self.calificacion_vendedor.0.saturating_add(puntaje as u32);
-            self.calificacion_vendedor.1 = self.calificacion_vendedor.1.saturating_add(1);
-            self.calificacion_vendedor_str = self.get_rating_as_str(&Rol::Vendedor)?;
-            Ok(())
-        }
-
-        fn get_rating_as_str(&self, target_rol: &Rol) -> Result<String, ErroresContrato> {
-            let (suma, cantidad) = match target_rol {
-                Rol::Comprador => self.calificacion_comprador,
-                Rol::Vendedor => self.calificacion_vendedor,
-                Rol::Ambos => return Err(ErroresContrato::RolNoApropiado),
-            };
-
-            if cantidad == 0 {
-                return Ok("0.0".to_string())
-            }
-
-            // Calculamos el promedio multiplicando por 10 para obtener un decimal
-            let promedio_x10: u32 = (suma
-                .checked_mul(10)
-                .ok_or(ErroresContrato::ErrorMultiplicacion)?)
-            .checked_div(cantidad)
-            .ok_or(ErroresContrato::ErrorMultiplicacion)?;
-
-            Ok(format!(
-                "{}.{}",
-                promedio_x10.div(10),
-                promedio_x10.rem(10)
-            ))
-        }
-    }
-
-    /// Estructuras relacionadas a producto
-
-    /// Categorias
-    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
-    #[ink::scale_derive(Encode, Decode, TypeInfo)]
-    pub struct Categoria {
-        id: u32,
-        nombre: String,
-    }
-
-    impl Categoria {
-        pub fn new(id: u32, nombre: String) -> Self {
-            Self { id, nombre }
-        }
-
-        pub fn get_id(&self) -> u32 {
-            self.id
-        }
-
-        pub fn get_nombre(&self) -> String {
-            self.nombre.clone()
-        }
-    }
-
-    ///Estructura de un producto
-    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
-    #[ink::scale_derive(Encode, Decode, TypeInfo)]
-    #[derive(PartialEq, Debug)]
-    pub struct Producto {
-        id: u32,
-        id_vendedor: AccountId,
-        nombre: String,
-        descripcion: String,
-        categoria: u32,
-        stock: u32,
-    }
-
-    impl Producto {
-        ///Crea un producto nuevo dado los parametros
-        pub fn new(
-            id: u32,
-            id_vendedor: AccountId,
-            nombre: String,
-            descripcion: String,
-            categoria: u32,
-            stock: u32,
-        ) -> Producto {
-            Producto {
-                id,
-                id_vendedor,
-                nombre,
-                descripcion,
-                categoria,
-                stock,
-            }
-        }
-
-        ///Compara un producto self con un producto pasado por parametro
-        pub fn eq(&self, p: &Producto) -> bool {
-            if self.nombre == p.nombre && self.categoria == p.categoria {
-                return true;
-            }
-            false
-        }
-
-        ///Retorna el id de un producto
-        pub fn get_id(&self) -> u32 {
-            self.id
-        }
-
-        ///Retorna el nombre de un producto
-        pub fn get_nombre(&self) -> String {
-            self.nombre.clone()
-        }
-
-        ///Retorna la categoria de un producto
-        pub fn get_id_categoria(&self) -> u32 {
-            self.categoria
-        }
-    }
-
-    impl ControlStock for Producto {
-        fn get_cantidad(&self) -> u32 {
-            self.stock
-        }
-
-        fn set_cantidad(&mut self, nueva: u32) {
-            self.stock = nueva;
-        }
-    }
-
-    ///LOGICA DE PUBLICACION
-
-    ///Estructura de publicacion
-    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
-    #[ink::scale_derive(Encode, Decode, TypeInfo)]
-    #[derive(PartialEq, Debug, Clone)]
-    pub struct Publicacion {
-        id: u32,
-        id_prod: u32,       //id del producto que contiene
-        id_user: AccountId, //id del user que publica
-        stock: u32,
-        precio_unitario: Balance,
-        pub activa: bool,
-    }
-
-    impl Publicacion {
-        pub fn new(
-            id: u32,
-            id_producto: u32,
-            id_user: AccountId,
-            stock: u32,
-            precio_unitario: Balance,
-        ) -> Publicacion {
-            Publicacion {
-                id,
-                id_prod: id_producto,
-                id_user,
-                stock,
-                precio_unitario,
-                activa: true,
-            }
-        }
-
-        ///Retorna el id de una publicacion
-        pub fn get_id(&self) -> u32 {
-            self.id
-        }
-
-        ///Retorna el id del producto asociado a la publicacion
-        pub fn get_id_producto(&self) -> u32 {
-            self.id_prod
-        }
-
-        pub fn stock(&self) -> u32 {
-            self.stock
-        }
-    }
-
-    impl ControlStock for Publicacion {
-        fn get_cantidad(&self) -> u32 {
-            self.stock
-        }
-
-        fn set_cantidad(&mut self, nueva: u32) {
-            self.stock = nueva;
-        }
-    }
-
-    ///Estructuras y logica de Orden
-    ///Posibles estados de una Ordem
-    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
-    #[ink::scale_derive(Encode, Decode, TypeInfo)]
-    pub enum EstadoOrden {
-        Pendiente,
-        Enviada,      //solo lo puede modificar el vendedor
-        Recibida,     //solo lo puede modificar el comprador
-        PreCancelada, //solo lo puede modificar el comprador
-        Cancelada,    //solo lo puede modificar el vendedor y tiene que estar en estado PreCancelada
-    }
-
-    ///Estructura de orden
-    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
-    #[ink::scale_derive(Encode, Decode, TypeInfo)]
-    #[derive(Clone)]
-    pub struct Orden {
-        id: u32,
-        id_publicacion: u32,
-        id_vendedor: AccountId,
-        id_comprador: AccountId,
-        status: EstadoOrden,
-        cantidad: u32,
-        precio_total: Balance,
-        cal_vendedor: Option<u8>,  //calificacion que recibe el vendedor
-        cal_comprador: Option<u8>, //calificacion que recibe el comprador
-    }
-
-    impl Orden {
-        ///crea una nueva orden
-        pub fn new(
-            id: u32,
-            id_publicacion: u32,
-            id_vendedor: AccountId,
-            id_comprador: AccountId,
-            cantidad: u32,
-            precio_total: Balance,
-        ) -> Orden {
-            Orden {
-                id,
-                id_publicacion,
-                id_vendedor,
-                id_comprador,
-                status: EstadoOrden::Pendiente,
-                cantidad,
-                precio_total,
-                cal_vendedor: None,
-                cal_comprador: None,
-            }
-        }
-        pub fn get_cantidad(&self) -> u32 {
-            self.cantidad
-        }
-
-        pub fn get_status(&self) -> EstadoOrden {
-            self.status
-        }
-
-        pub fn get_id_pub(&self) -> u32 {
-            self.id_publicacion
-        }
-
-        pub fn get_id_comprador(&self) -> AccountId {
-            self.id_comprador.clone()
-        }
-
-        pub fn get_id_vendedor(&self) -> AccountId {
-            self.id_vendedor.clone()
-        }
-
-        pub fn get_calificacion_vendedor(&self) -> Option<u8> {
-            self.cal_vendedor
-        }
-
-        pub fn get_calificacion_comprador(&self) -> Option<u8> {
-            self.cal_comprador
-        }
-
-
-    }
+   
 }
 
 pub mod prelude {
@@ -2881,13 +3666,13 @@ mod tests {
         let _orden = sistema.listar_ordenes()[0].clone();
         // Verrificamos que la repu aumento
         let usuario_vendedor = sistema.get_user(&vendedor).unwrap();
-        // accedemos a la tupla para ver los resultados
+        // accedemos a la tupla para ver los resultados usando el getter
         assert_eq!(
-            usuario_vendedor.rating.calificacion_vendedor.0, 5,
+            usuario_vendedor.get_rating().get_calificacion_vendedor().0, 5,
             "Debería tener 1 calificación"
         );
         assert_eq!(
-            usuario_vendedor.rating.calificacion_vendedor.1, 1,
+            usuario_vendedor.get_rating().get_calificacion_vendedor().1, 1,
             "La suma de puntos debería ser 5"
         );
     }
@@ -2902,8 +3687,8 @@ mod tests {
         assert!(res.is_ok());
         let usuario_comprador = sistema.get_user(&comprador).unwrap();
 
-        assert_eq!(usuario_comprador.rating.calificacion_comprador.0, 4);
-        assert_eq!(usuario_comprador.rating.calificacion_comprador.1, 1);
+        assert_eq!(usuario_comprador.get_rating().get_calificacion_comprador().0, 4);
+        assert_eq!(usuario_comprador.get_rating().get_calificacion_comprador().1, 1);
     }
 
     #[ink::test]
@@ -3177,7 +3962,7 @@ mod tests {
         // Verificar stock inicial de la publicación
         let publicaciones_inicial = sistema.listar_publicaciones();
         assert_eq!(publicaciones_inicial[0].stock(), 25);
-        assert_eq!(publicaciones_inicial[0].activa, true);
+        assert_eq!(publicaciones_inicial[0].get_activa(), true);
         
         // Pedro compra 3 smartphones
         set_caller(pedro_id);
@@ -3218,14 +4003,14 @@ mod tests {
         // Verificar que el stock se devolvió correctamente
         let publicaciones_final = sistema.listar_publicaciones();
         assert_eq!(publicaciones_final[0].stock(), 25); // 22 + 3 = 25 (stock original)
-        assert_eq!(publicaciones_final[0].activa, true); // Se reactivó
+        assert_eq!(publicaciones_final[0].get_activa(), true); // Se reactivó
         
         println!("=== TEST CANCELACIÓN CON CONSENSO ===");
         println!("Stock inicial: 25");
         println!("Stock después de orden: 22");
         println!("Stock después de cancelación: 25");
         println!("Estado final de la orden: {:?}", ordenes_cancelada[0].get_status());
-        println!("Publicación activa: {}", publicaciones_final[0].activa);
+        println!("Publicación activa: {}", publicaciones_final[0].get_activa());
     }
 
     #[ink::test]
@@ -3483,7 +4268,7 @@ mod tests {
 
     #[ink::test]
     fn test_get_calificacion_vendedor_orden() {
-        let (mut sistema, id_orden, comprador, vendedor) = setup_orden_recibida();
+        let (mut sistema, id_orden, comprador, _) = setup_orden_recibida();
         
         // Verificar que inicialmente no hay calificación
         let ordenes = sistema.listar_ordenes();
@@ -3502,7 +4287,7 @@ mod tests {
 
     #[ink::test]
     fn test_get_calificacion_comprador_orden() {
-        let (mut sistema, id_orden, comprador, vendedor) = setup_orden_recibida();
+        let (mut sistema, id_orden, _, vendedor) = setup_orden_recibida();
         
         // Verificar que inicialmente no hay calificación
         let ordenes = sistema.listar_ordenes();
@@ -3517,5 +4302,545 @@ mod tests {
         let ordenes = sistema.listar_ordenes();
         let orden = &ordenes[id_orden as usize];
         assert_eq!(orden.get_calificacion_comprador(), Some(5));
+    }
+
+    #[ink::test]
+    fn test_set_mail_usuario() {
+        let mut usuario = Usuario::new(
+            account_id(AccountKeyring::Alice),
+            "Test User".into(),
+            "test@original.com".into()
+        );
+        
+        let nuevo_mail = "nuevo@email.com".to_string();
+        usuario.set_mail(nuevo_mail.clone());
+        
+        assert_eq!(usuario.get_mail(), nuevo_mail);
+    }
+
+    #[ink::test]
+    fn test_set_rating_usuario() {
+        let mut usuario = Usuario::new(
+            account_id(AccountKeyring::Alice),
+            "Test User".into(),
+            "test@email.com".into()
+        );
+        
+        let mut nuevo_rating = Rating::new();
+        nuevo_rating.set_calificacion_comprador((15, 3)); // Promedio 5.0
+        nuevo_rating.set_calificacion_vendedor((8, 2));   // Promedio 4.0
+        
+        usuario.set_rating(nuevo_rating.clone());
+        
+        assert_eq!(usuario.get_rating().get_calificacion_comprador(), (15, 3));
+        assert_eq!(usuario.get_rating().get_calificacion_vendedor(), (8, 2));
+    }
+
+    #[ink::test]
+    fn test_set_roles_usuario() {
+        let mut usuario = Usuario::new(
+            account_id(AccountKeyring::Alice),
+            "Test User".into(),
+            "test@email.com".into()
+        );
+        
+        let nuevos_roles = vec![Rol::Comprador, Rol::Vendedor];
+        usuario.set_roles(nuevos_roles.clone());
+        
+        assert_eq!(usuario.has_role(Rol::Comprador), true);
+        assert_eq!(usuario.has_role(Rol::Vendedor), true);
+        assert_eq!(usuario.has_role(Rol::Ambos), false);
+    }
+
+    #[ink::test]
+    fn test_add_rol_usuario() {
+        let mut usuario = Usuario::new(
+            account_id(AccountKeyring::Alice),
+            "Test User".into(),
+            "test@email.com".into()
+        );
+        
+        // Agregar primer rol
+        usuario.add_rol(Rol::Comprador);
+        assert_eq!(usuario.has_role(Rol::Comprador), true);
+        
+        // Agregar segundo rol
+        usuario.add_rol(Rol::Vendedor);
+        assert_eq!(usuario.has_role(Rol::Vendedor), true);
+        
+        // Intentar agregar rol duplicado - no debería duplicarse
+        usuario.add_rol(Rol::Comprador);
+        let count_comprador = usuario.get_roles().iter().filter(|&r| *r == Rol::Comprador).count();
+        assert_eq!(count_comprador, 1);
+    }
+
+    #[ink::test]
+    fn test_remove_rol_usuario() {
+        let mut usuario = Usuario::new(
+            account_id(AccountKeyring::Alice),
+            "Test User".into(),
+            "test@email.com".into()
+        );
+        
+        // Agregar roles
+        usuario.add_rol(Rol::Comprador);
+        usuario.add_rol(Rol::Vendedor);
+        
+        // Verificar que ambos están presentes
+        assert_eq!(usuario.has_role(Rol::Comprador), true);
+        assert_eq!(usuario.has_role(Rol::Vendedor), true);
+        
+        // Remover un rol
+        usuario.remove_rol(&Rol::Comprador);
+        assert_eq!(usuario.has_role(Rol::Comprador), false);
+        assert_eq!(usuario.has_role(Rol::Vendedor), true);
+        
+        // Remover rol que no existe - no debería fallar
+        usuario.remove_rol(&Rol::Ambos);
+        assert_eq!(usuario.has_role(Rol::Vendedor), true);
+    }
+
+    #[ink::test]
+    fn test_set_status_orden() {
+        let (sistema, id_orden, _, _) = setup_orden_recibida();
+        
+        let ordenes = sistema.listar_ordenes();
+        let mut orden = ordenes[id_orden as usize].clone();
+        
+        // Verificar estado inicial
+        assert_eq!(orden.get_status(), EstadoOrden::Recibida);
+        
+        // Cambiar estado
+        orden.set_status(EstadoOrden::Cancelada);
+        assert_eq!(orden.get_status(), EstadoOrden::Cancelada);
+        
+        // Cambiar a otro estado
+        orden.set_status(EstadoOrden::Pendiente);
+        assert_eq!(orden.get_status(), EstadoOrden::Pendiente);
+    }
+
+    #[ink::test]
+    fn test_set_calificacion_vendedor_orden() {
+        let (sistema, id_orden, _, _) = setup_orden_recibida();
+        
+        let ordenes = sistema.listar_ordenes();
+        let mut orden = ordenes[id_orden as usize].clone();
+        
+        // Verificar que inicialmente no hay calificación
+        assert_eq!(orden.get_calificacion_vendedor(), None);
+        
+        // Establecer calificación
+        orden.set_calificacion_vendedor(Some(4));
+        assert_eq!(orden.get_calificacion_vendedor(), Some(4));
+        
+        // Cambiar calificación
+        orden.set_calificacion_vendedor(Some(5));
+        assert_eq!(orden.get_calificacion_vendedor(), Some(5));
+        
+        // Quitar calificación
+        orden.set_calificacion_vendedor(None);
+        assert_eq!(orden.get_calificacion_vendedor(), None);
+    }
+
+    #[ink::test]
+    fn test_set_calificacion_comprador_orden() {
+        let (sistema, id_orden, _, _) = setup_orden_recibida();
+        
+        let ordenes = sistema.listar_ordenes();
+        let mut orden = ordenes[id_orden as usize].clone();
+        
+        // Verificar que inicialmente no hay calificación
+        assert_eq!(orden.get_calificacion_comprador(), None);
+        
+        // Establecer calificación
+        orden.set_calificacion_comprador(Some(3));
+        assert_eq!(orden.get_calificacion_comprador(), Some(3));
+        
+        // Cambiar calificación
+        orden.set_calificacion_comprador(Some(2));
+        assert_eq!(orden.get_calificacion_comprador(), Some(2));
+        
+        // Quitar calificación
+        orden.set_calificacion_comprador(None);
+        assert_eq!(orden.get_calificacion_comprador(), None);
+    }
+
+    #[ink::test]
+    fn test_setters_orden_integracion() {
+        let (sistema, id_orden, _, _) = setup_orden_recibida();
+        
+        let ordenes = sistema.listar_ordenes();
+        let mut orden = ordenes[id_orden as usize].clone();
+        
+        // Cambiar múltiples campos
+        orden.set_status(EstadoOrden::Cancelada);
+        orden.set_calificacion_vendedor(Some(4));
+        orden.set_calificacion_comprador(Some(5));
+        
+        // Verificar todos los cambios
+        assert_eq!(orden.get_status(), EstadoOrden::Cancelada);
+        assert_eq!(orden.get_calificacion_vendedor(), Some(4));
+        assert_eq!(orden.get_calificacion_comprador(), Some(5));
+    }
+
+    #[ink::test]
+    fn test_set_status_orden_individual() {
+        let (sistema, id_orden, _, _) = setup_orden_recibida();
+        
+        let ordenes = sistema.listar_ordenes();
+        let mut orden = ordenes[id_orden as usize].clone();
+        
+        // Test cambio de Recibida a Pendiente
+        orden.set_status(EstadoOrden::Pendiente);
+        assert_eq!(orden.get_status(), EstadoOrden::Pendiente);
+        
+        // Test cambio de Pendiente a Enviada
+        orden.set_status(EstadoOrden::Enviada);
+        assert_eq!(orden.get_status(), EstadoOrden::Enviada);
+        
+        // Test cambio de Enviada a PreCancelada
+        orden.set_status(EstadoOrden::PreCancelada);
+        assert_eq!(orden.get_status(), EstadoOrden::PreCancelada);
+        
+        // Test cambio de PreCancelada a Cancelada
+        orden.set_status(EstadoOrden::Cancelada);
+        assert_eq!(orden.get_status(), EstadoOrden::Cancelada);
+        
+        // Test cambio directo a Recibida
+        orden.set_status(EstadoOrden::Recibida);
+        assert_eq!(orden.get_status(), EstadoOrden::Recibida);
+    }
+
+    #[ink::test]
+    fn test_set_calificacion_vendedor_individual() {
+        let (sistema, id_orden, _, _) = setup_orden_recibida();
+        
+        let ordenes = sistema.listar_ordenes();
+        let mut orden = ordenes[id_orden as usize].clone();
+        
+        // Verificar estado inicial
+        assert_eq!(orden.get_calificacion_vendedor(), None);
+        
+        // Test establecer calificación válida mínima
+        orden.set_calificacion_vendedor(Some(1));
+        assert_eq!(orden.get_calificacion_vendedor(), Some(1));
+        
+        // Test establecer calificación válida máxima
+        orden.set_calificacion_vendedor(Some(5));
+        assert_eq!(orden.get_calificacion_vendedor(), Some(5));
+        
+        // Test establecer calificación media
+        orden.set_calificacion_vendedor(Some(3));
+        assert_eq!(orden.get_calificacion_vendedor(), Some(3));
+        
+        // Test quitar calificación
+        orden.set_calificacion_vendedor(None);
+        assert_eq!(orden.get_calificacion_vendedor(), None);
+        
+        // Test re-establecer después de quitar
+        orden.set_calificacion_vendedor(Some(4));
+        assert_eq!(orden.get_calificacion_vendedor(), Some(4));
+    }
+
+    #[ink::test]
+    fn test_set_calificacion_comprador_individual() {
+        let (sistema, id_orden, _, _) = setup_orden_recibida();
+        
+        let ordenes = sistema.listar_ordenes();
+        let mut orden = ordenes[id_orden as usize].clone();
+        
+        // Verificar estado inicial
+        assert_eq!(orden.get_calificacion_comprador(), None);
+        
+        // Test establecer calificación válida mínima
+        orden.set_calificacion_comprador(Some(1));
+        assert_eq!(orden.get_calificacion_comprador(), Some(1));
+        
+        // Test establecer calificación válida máxima
+        orden.set_calificacion_comprador(Some(5));
+        assert_eq!(orden.get_calificacion_comprador(), Some(5));
+        
+        // Test establecer calificación media
+        orden.set_calificacion_comprador(Some(2));
+        assert_eq!(orden.get_calificacion_comprador(), Some(2));
+        
+        // Test quitar calificación
+        orden.set_calificacion_comprador(None);
+        assert_eq!(orden.get_calificacion_comprador(), None);
+        
+        // Test re-establecer después de quitar
+        orden.set_calificacion_comprador(Some(5));
+        assert_eq!(orden.get_calificacion_comprador(), Some(5));
+    }
+
+    #[ink::test]
+    fn test_setters_orden_estados_completos() {
+        let (sistema, id_orden, _, _) = setup_orden_recibida();
+        
+        let ordenes = sistema.listar_ordenes();
+        let mut orden = ordenes[id_orden as usize].clone();
+        
+        // Test secuencia completa de estados
+        let estados = [
+            EstadoOrden::Pendiente,
+            EstadoOrden::Enviada,
+            EstadoOrden::Recibida,
+            EstadoOrden::PreCancelada,
+            EstadoOrden::Cancelada,
+        ];
+        
+        for estado in estados.iter() {
+            orden.set_status(*estado);
+            assert_eq!(orden.get_status(), *estado);
+        }
+    }
+
+    #[ink::test]
+    fn test_setters_orden_calificaciones_limites() {
+        let (sistema, id_orden, _, _) = setup_orden_recibida();
+        
+        let ordenes = sistema.listar_ordenes();
+        let mut orden = ordenes[id_orden as usize].clone();
+        
+        // Test todas las calificaciones válidas para vendedor
+        for puntaje in 1..=5 {
+            orden.set_calificacion_vendedor(Some(puntaje));
+            assert_eq!(orden.get_calificacion_vendedor(), Some(puntaje));
+        }
+        
+        // Test todas las calificaciones válidas para comprador
+        for puntaje in 1..=5 {
+            orden.set_calificacion_comprador(Some(puntaje));
+            assert_eq!(orden.get_calificacion_comprador(), Some(puntaje));
+        }
+        
+        // Test intercambio None y Some
+        orden.set_calificacion_vendedor(None);
+        orden.set_calificacion_comprador(None);
+        assert_eq!(orden.get_calificacion_vendedor(), None);
+        assert_eq!(orden.get_calificacion_comprador(), None);
+        
+        orden.set_calificacion_vendedor(Some(3));
+        orden.set_calificacion_comprador(Some(4));
+        assert_eq!(orden.get_calificacion_vendedor(), Some(3));
+        assert_eq!(orden.get_calificacion_comprador(), Some(4));
+    }
+
+    #[ink::test]
+    fn test_setters_orden_inmutabilidad_otros_campos() {
+        let (sistema, id_orden, _, _) = setup_orden_recibida();
+        
+        let ordenes = sistema.listar_ordenes();
+        let mut orden = ordenes[id_orden as usize].clone();
+        
+        // Guardar valores originales
+        let cantidad_original = orden.get_cantidad();
+        let id_pub_original = orden.get_id_pub();
+        let comprador_original = orden.get_id_comprador();
+        let vendedor_original = orden.get_id_vendedor();
+        
+        // Modificar campos con setters
+        orden.set_status(EstadoOrden::Cancelada);
+        orden.set_calificacion_vendedor(Some(5));
+        orden.set_calificacion_comprador(Some(4));
+        
+        // Verificar que otros campos no cambiaron
+        assert_eq!(orden.get_cantidad(), cantidad_original);
+        assert_eq!(orden.get_id_pub(), id_pub_original);
+        assert_eq!(orden.get_id_comprador(), comprador_original);
+        assert_eq!(orden.get_id_vendedor(), vendedor_original);
+        
+        // Verificar que los setters funcionaron
+        assert_eq!(orden.get_status(), EstadoOrden::Cancelada);
+        assert_eq!(orden.get_calificacion_vendedor(), Some(5));
+        assert_eq!(orden.get_calificacion_comprador(), Some(4));
+    }
+
+    // ========== Tests para getters/setters de campos anteriormente públicos ==========
+
+    #[ink::test]
+    fn test_usuario_get_rating() {
+        let usuario = Usuario::new(
+            account_id(AccountKeyring::Alice),
+            "Test User".into(),
+            "test@email.com".into()
+        );
+        
+        let rating = usuario.get_rating();
+        assert_eq!(rating.get_calificacion_comprador(), (0, 0));
+        assert_eq!(rating.get_calificacion_vendedor(), (0, 0));
+    }
+
+    #[ink::test]
+    fn test_usuario_get_roles() {
+        let mut usuario = Usuario::new(
+            account_id(AccountKeyring::Alice),
+            "Test User".into(),
+            "test@email.com".into()
+        );
+        
+        // Inicialmente sin roles
+        assert_eq!(usuario.get_roles().len(), 0);
+        
+        // Agregar roles
+        usuario.add_rol(Rol::Comprador);
+        usuario.add_rol(Rol::Vendedor);
+        
+        // Verificar
+        assert_eq!(usuario.get_roles().len(), 2);
+        assert!(usuario.get_roles().contains(&Rol::Comprador));
+        assert!(usuario.get_roles().contains(&Rol::Vendedor));
+    }
+
+    #[ink::test]
+    fn test_rating_getters() {
+        let mut rating = Rating::new();
+        
+        // Valores iniciales
+        assert_eq!(rating.get_calificacion_comprador(), (0, 0));
+        assert_eq!(rating.get_calificacion_vendedor(), (0, 0));
+        assert_eq!(rating.get_calificacion_comprador_str(), "0");
+        assert_eq!(rating.get_calificacion_vendedor_str(), "0");
+        
+        // Modificar con setters
+        rating.set_calificacion_comprador((15, 3));
+        rating.set_calificacion_vendedor((20, 4));
+        
+        // Verificar getters
+        assert_eq!(rating.get_calificacion_comprador(), (15, 3));
+        assert_eq!(rating.get_calificacion_vendedor(), (20, 4));
+    }
+
+    #[ink::test]
+    fn test_rating_setters() {
+        let mut rating = Rating::new();
+        
+        // Set calificaciones
+        rating.set_calificacion_comprador((25, 5));
+        rating.set_calificacion_vendedor((18, 3));
+        rating.set_calificacion_comprador_str("5.0".to_string());
+        rating.set_calificacion_vendedor_str("6.0".to_string());
+        
+        // Verificar
+        assert_eq!(rating.get_calificacion_comprador(), (25, 5));
+        assert_eq!(rating.get_calificacion_vendedor(), (18, 3));
+        assert_eq!(rating.get_calificacion_comprador_str(), "5.0");
+        assert_eq!(rating.get_calificacion_vendedor_str(), "6.0");
+    }
+
+    #[ink::test]
+    fn test_rating_setters_strings() {
+        let mut rating = Rating::new();
+        
+        rating.set_calificacion_comprador_str("4.7".to_string());
+        rating.set_calificacion_vendedor_str("3.2".to_string());
+        
+        assert_eq!(rating.get_calificacion_comprador_str(), "4.7");
+        assert_eq!(rating.get_calificacion_vendedor_str(), "3.2");
+    }
+
+    #[ink::test]
+    fn test_publicacion_get_activa() {
+        let publicacion = Publicacion::new(
+            0,
+            1,
+            account_id(AccountKeyring::Bob),
+            10,
+            100
+        );
+        
+        // Nueva publicación debe estar activa
+        assert_eq!(publicacion.get_activa(), true);
+    }
+
+    #[ink::test]
+    fn test_publicacion_set_activa() {
+        let mut publicacion = Publicacion::new(
+            0,
+            1,
+            account_id(AccountKeyring::Bob),
+            10,
+            100
+        );
+        
+        // Desactivar publicación
+        publicacion.set_activa(false);
+        assert_eq!(publicacion.get_activa(), false);
+        
+        // Reactivar publicación
+        publicacion.set_activa(true);
+        assert_eq!(publicacion.get_activa(), true);
+    }
+
+    #[ink::test]
+    fn test_publicacion_activa_toggle() {
+        let mut publicacion = Publicacion::new(
+            0,
+            1,
+            account_id(AccountKeyring::Bob),
+            10,
+            100
+        );
+        
+        // Estado inicial
+        assert_eq!(publicacion.get_activa(), true);
+        
+        // Toggle varias veces
+        publicacion.set_activa(false);
+        assert_eq!(publicacion.get_activa(), false);
+        
+        publicacion.set_activa(true);
+        assert_eq!(publicacion.get_activa(), true);
+        
+        publicacion.set_activa(false);
+        assert_eq!(publicacion.get_activa(), false);
+    }
+
+    #[ink::test]
+    fn test_rating_todos_los_getters_setters() {
+        let mut rating = Rating::new();
+        
+        // Test get_calificacion_comprador y set
+        rating.set_calificacion_comprador((12, 3));
+        assert_eq!(rating.get_calificacion_comprador(), (12, 3));
+        
+        // Test get_calificacion_vendedor y set
+        rating.set_calificacion_vendedor((8, 2));
+        assert_eq!(rating.get_calificacion_vendedor(), (8, 2));
+        
+        // Test get/set strings
+        rating.set_calificacion_comprador_str("4.0".to_string());
+        rating.set_calificacion_vendedor_str("4.0".to_string());
+        assert_eq!(rating.get_calificacion_comprador_str(), "4.0");
+        assert_eq!(rating.get_calificacion_vendedor_str(), "4.0");
+    }
+
+    #[ink::test]
+    fn test_usuario_get_rating_inmutable() {
+        let usuario = Usuario::new(
+            account_id(AccountKeyring::Alice),
+            "Test".into(),
+            "test@test.com".into()
+        );
+        
+        // get_rating debe devolver referencia inmutable
+        let rating_ref = usuario.get_rating();
+        assert_eq!(rating_ref.get_calificacion_comprador(), (0, 0));
+    }
+
+    #[ink::test]
+    fn test_usuario_get_roles_inmutable() {
+        let mut usuario = Usuario::new(
+            account_id(AccountKeyring::Alice),
+            "Test".into(),
+            "test@test.com".into()
+        );
+        
+        usuario.add_rol(Rol::Comprador);
+        
+        // get_roles debe devolver referencia inmutable
+        let roles_ref = usuario.get_roles();
+        assert_eq!(roles_ref.len(), 1);
+        assert!(roles_ref.contains(&Rol::Comprador));
     }
 }
